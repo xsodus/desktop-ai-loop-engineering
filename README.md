@@ -11,11 +11,12 @@ Terms of Service of any software they automate.
 
 ## Overview
 
-This project packages three ideas into one reusable framework:
+This project packages four ideas into one reusable framework:
 
 - loop engineering for reliable agent behavior
 - visual AI workflows that reason over fresh screenshots
 - skill-based desktop automation on macOS
+- contextual UI detection for guarded, resolution-independent actions
 
 The repository is structured for people who want to study or extend:
 
@@ -30,8 +31,12 @@ The repository is structured for people who want to study or extend:
 - macOS controller for app launch, focus, screenshots, clicks, and key presses
 - Skill folders that document policy separately from implementation
 - Loop-state tracker that requires repeated confirmation before completion
+- Normalized click presets for known Tree of Savior M Extreme controls
+- Region-of-interest color detection with confidence thresholds and an optional
+  AI fallback
 - CLI harness for repeatable local testing
-- Reusable skill-based workflows for local automation
+- Reusable skills for generic desktop loops, Spotlight launching, and the
+  Tree of Savior M Extreme main-quest workflow
 
 ## How It Works
 
@@ -63,7 +68,7 @@ flowchart TD
     C --> M["macOS controller<br/>src/macos-controller.ts"]
     M --> A["Target desktop application"]
     A --> O["Fresh screenshot / UI observation"]
-    O --> L["Agent loop<br/>src/agent-loop.ts"]
+    O --> L["Agent loop or context engine<br/>src/agent-loop.ts / src/tos-context-engine.ts"]
     L --> T["Observation tracker<br/>src/observation-loop-tracker.ts"]
     T --> S
 ```
@@ -77,8 +82,13 @@ flowchart TD
   state-to-action mapping.
 - `src/observation-loop-tracker.ts` enforces safe completion through repeated
   fresh observations.
-- `skills/launch-app-via-spotlight/SKILL.md` shows how skills document a
-  workflow policy independently of code.
+- `src/tos-presets.ts` maps named TOS actions to normalized window coordinates.
+- `src/macos-image-sampler.ts` samples pixels from normalized screenshot regions
+  with macOS Core Graphics.
+- `src/tos-context-engine.ts` combines region detectors, confidence thresholds,
+  click/wait decisions, and an optional AI fallback.
+- `skills/run-tree-of-savior-m-extreme-quests/SKILL.md` defines the persistent,
+  safety-constrained main-quest workflow.
 
 ## Skill System
 
@@ -92,6 +102,44 @@ Skills are the human-readable policy layer. They describe:
 
 That makes the decision logic auditable without burying everything inside
 controller code.
+
+The included skills are:
+
+- `run-tree-of-savior-m-extreme-quests`: runs the visible yellow main-quest loop
+  through Computer Use, including fellow and auto-potion checks, reward handling,
+  recovery, token-efficient observation, and a three-observation completion rule
+- `run-visual-desktop-loop`: provides the reusable controller-backed
+  observe-decide-act-verify pattern
+- `launch-app-via-spotlight`: launches and verifies an installed macOS app using
+  Spotlight
+
+The TOS skill intentionally uses Computer Use as its primary runtime. The
+repository's `tos-detect` and `tos-click` commands are diagnostics and
+experimentation surfaces; the skill does not silently switch to them during its
+normal game loop.
+
+## TOS Context Detection
+
+The contextual detector evaluates a normalized region of a screenshot instead
+of assuming a fixed pixel resolution. Each detector returns a confidence score.
+The engine chooses the strongest result above its configured threshold, maps
+known actionable states to a guarded click preset, and otherwise waits. An AI
+classifier can be supplied as a fallback when deterministic detectors are not
+confident enough.
+
+The current CLI detector recognizes the yellow quest card by color within the
+quest-tracker region:
+
+```bash
+pnpm workflow window-screenshot artifacts/tos-current.png "TOSM TH"
+pnpm workflow tos-detect artifacts/tos-current.png
+pnpm workflow tos-click yellow-quest artifacts/tos-current.png "TOSM TH"
+```
+
+`tos-click` also supports `quest-accept`, `quest-action`, and `fellow-menu`.
+Always capture a fresh window screenshot before acting; normalized coordinates
+protect against resolution changes, but not against stale or unexpected UI
+state.
 
 ## Agent Loop
 
@@ -127,15 +175,27 @@ pnpm workflow launch "Notes"
 pnpm workflow focus "Notes"
 pnpm workflow window-screenshot artifacts/current-window.png "Notes"
 pnpm workflow window-click 640 420 artifacts/current-window.png "Notes"
+pnpm workflow tos-detect artifacts/tos-current.png
+pnpm workflow tos-click yellow-quest artifacts/tos-current.png "TOSM TH"
 pnpm test
 ```
 
 ## Repository Layout
 
-- `skills/` installed workflow skills used by Codex and related agents
+- `skills/` source workflow skills for Codex and related agents
 - `src/` controller and loop implementation
 - `test/` coverage for loop and controller behavior
 - `scripts/nemo.mjs` interactive skill symlink installer
+
+Install or refresh the skills interactively with:
+
+```bash
+pnpm install
+pnpm nemo symlink
+```
+
+The installer can symlink selected skills into project-local or global skill
+directories for Codex, Claude Code, Cursor, and Gemini CLI.
 
 ## Safety Considerations
 
@@ -147,8 +207,10 @@ pnpm test
 
 ## Future Roadmap
 
-- Add more neutral skill examples for email, monitoring, and data-entry flows
-- Introduce pluggable state classifiers for different desktop applications
+- Add more reusable skills for email, monitoring, and data-entry flows
+- Add more deterministic TOS detectors for reward, action, transition, and idle
+  states
+- Calibrate detector regions and confidence thresholds against more window sizes
 - Expand test fixtures for screenshot-driven workflows
 - Add structured telemetry for loop decisions and recovery behavior
 - Package the controller and skill templates for easier onboarding
