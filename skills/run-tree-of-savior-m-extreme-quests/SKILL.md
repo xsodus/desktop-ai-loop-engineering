@@ -201,6 +201,16 @@ completion.
 
 ### Timeout Recovery
 
+### Battery Saver Mode
+
+The game can intentionally render a fully black game window while Battery Saver
+mode is active. Treat this as an idle-display state, not a crash, disconnect,
+loading failure, or quest-exhaustion state. Capture a fresh screenshot and
+click/tap the game window once to wake it, then refresh AX state and capture a
+new screenshot before resuming the quest loop. Do not count repeated black
+Battery Saver screenshots as recovery failures, and do not relaunch the game
+solely because of this display state.
+
 If the session times out, disconnects, returns to title, or gets stuck on a loading/session screen:
 
 1. If the game window is temporarily unavailable, reacquire the app through
