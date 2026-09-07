@@ -1,11 +1,16 @@
 import { resolve } from "node:path";
 import { MacAppController } from "./macos-controller.ts";
+import { MacImageSampler } from "./macos-image-sampler.ts";
 import {
   recordObservation,
   resetObservationLoopTracker,
   type ObservationClassification,
 } from "./observation-loop-tracker.ts";
 import { isTosClickPreset, tosPresetPoint } from "./tos-presets.ts";
+import {
+  TosContextEngine,
+  createColorRatioDetector,
+} from "./tos-context-engine.ts";
 
 const controller = new MacAppController();
 const [command, ...args] = process.argv.slice(2);
@@ -85,6 +90,26 @@ switch (command) {
     console.log(JSON.stringify({ preset, ...result }, null, 2));
     break;
   }
+  case "tos-detect": {
+    const imagePath = resolve(args[0] ?? "artifacts/tos-current.png");
+    const engine = new TosContextEngine([
+      createColorRatioDetector({
+        name: "yellow-quest-color",
+        state: "yellow-quest-visible",
+        region: { x: 0.055, y: 0.13, width: 0.18, height: 0.075 },
+        target: { red: 235, green: 185, blue: 45 },
+        tolerance: 65,
+        fullConfidenceRatio: 0.025,
+        sampler: new MacImageSampler(),
+      }),
+    ]);
+    const decision = await engine.decide({
+      path: imagePath,
+      capturedAt: Date.now(),
+    });
+    console.log(JSON.stringify(decision, null, 2));
+    break;
+  }
   case "key": {
     const keyCode = Number(args[0]);
     await controller.pressKey(keyCode, args.slice(1));
@@ -130,6 +155,7 @@ switch (command) {
   pnpm workflow click <x> <y>
   pnpm workflow window-click <image-x> <image-y> [source-image.png] <process name>
   pnpm workflow tos-click <yellow-quest|quest-accept|quest-action|fellow-menu> [source-image.png] [process name]
+  pnpm workflow tos-detect [source-image.png]
   pnpm workflow key <macOS key code> [command|control|option|shift ...]
   pnpm workflow doctor [permission-check.png]
   pnpm workflow loop-reset [state.json]

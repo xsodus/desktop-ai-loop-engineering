@@ -21,82 +21,66 @@ top-level container or nested `Wrapper/TOSM TH.app` bundle.
 
 ## Workflow
 
-### Controller Contract
+### Computer Use (Primary)
 
-Run the TypeScript controller from the repository root. Resolve that root from
-the current Git worktree; never assume a user name or an absolute checkout
-location:
+Use `mcp__cua_repl` for all game screenshots, clicks, and keyboard input.
+Do not run the repository controller, `doctor`, `loop-observe`, shell-based UI
+commands, OCR, or image samplers in the normal workflow. A user request for pure
+Computer Use keeps the whole game loop on this interface. Use a different
+controller only when the user explicitly requests it.
 
-```bash
-cd "$(git rev-parse --show-toplevel)"
-pnpm workflow doctor
-```
+1. Select `Tree of Savior M Extreme` with `cua.getApp(...)`. Follow the tool's
+   first-call documentation and reuse the resulting app binding throughout.
+2. If the name does not resolve, call `cua.listApps()` and retry with the returned
+   bundle identifier. If duplicate wrapper apps make it ambiguous, select the
+   full path reported by the tool, preferring the running wrapper. Never hardcode
+   a temporary wrapper path from a previous session.
+3. Capture the game window with `game.getScreenshot()`. App selection can launch
+   the app; a process entry alone does not prove the game window is ready.
+4. Use screenshot coordinates for game controls because its accessibility tree
+   may expose only the window and menu bar. Derive each target from the current
+   screenshot; never reuse coordinates after resizing or a layout change.
+5. After each state-changing input, refresh AX state and inspect a fresh game
+   screenshot before deciding the next input. For this visually rendered game,
+   suppress repeated AX text while still performing the required refresh:
 
-If the current directory is not inside the controller repository, first locate
-the checkout containing this skill, `package.json`, and `src/cli.ts`, then run
-the commands from that checkout's root.
+   ```javascript
+   await game.click([x, y]);
+   await game.getAXState({ emit: false });
+   await game.getScreenshot();
+   ```
 
-The controller is the primary keyboard, pointer, and screenshot interface for
-this skill. Before launch, require both `accessibility` and `screenRecording` to
-be `true`. If either is false, stop and tell the user which macOS permission is
-missing; do not pretend the live loop ran.
+If Computer Use reports missing access or cannot capture/control the window,
+report the concrete blocker. Do not claim the quest loop ran or switch silently
+to another controller.
 
-Available commands:
+### Token-Efficient Observation
 
-```bash
-pnpm workflow launch "Tree of Savior M Extreme" "TOSM TH"
-pnpm workflow focus "TOSM TH"
-pnpm workflow window-screenshot artifacts/tos-current.png "TOSM TH"
-pnpm workflow window-click <image-x> <image-y> artifacts/tos-current.png "TOSM TH"
-pnpm workflow tos-click <yellow-quest|quest-accept|quest-action|fellow-menu> artifacts/tos-current.png "TOSM TH"
-pnpm workflow key <macOS-key-code> [command|control|option|shift ...]
-pnpm workflow loop-reset
-pnpm workflow loop-observe <idle|activity> artifacts/tos-current.png
-```
-
-Use `window-screenshot`, not a whole-desktop screenshot, for game decisions. It
-returns the game window bounds, pixel dimensions, and an image whose top-left
-corner is `(0, 0)`. Calculate every click in pixels from that current image, then
-pass the pixel point and image path to `window-click`. The controller handles
-Retina scaling, translates the result to the correct global point, and injects
-the click through Core Graphics even when the game is on a monitor above or to
-the left of the primary display.
-
-After visually confirming the expected control on the current screenshot, use
-`tos-click` for its named stable target instead of recalculating coordinates:
-
-- `yellow-quest` clicks the yellow main-quest card.
-- `quest-accept` clicks the right-hand teal `ตอบรับ` button when a gray decline
-  button is also visible.
-- `quest-action` clicks the centered teal action on a single-action quest reward
-  dialog, including equivalent quest verbs such as `ปลดปล่อย`.
-- `fellow-menu` opens Fellow from the stable top-right menu row.
-
-These presets are fast paths, not state detection. Never use one unless the
-matching control is visibly present on the fresh screenshot. Continue using
-`window-click` for team slots, Join, confirmations, or any shifted/ambiguous UI.
-
-After every state-changing input, capture a fresh window screenshot and inspect
-it before choosing the next input. Never reuse coordinates from a previous
-window size.
-
-Run `pnpm workflow loop-reset` once before entering the quest loop. After inspecting
-every fresh screenshot, run `loop-observe activity` if any quest,
-objective, dialogue, reward, loading, combat, transition, or recovery state is
-visible. Run `loop-observe idle` only for an idle, unobstructed in-game
-screen with none of those states. The command persists `empty_state_count`,
-rejects reused or insufficiently separated empty screenshots, and returns
-`mustContinue: true` until three valid empty observations have accumulated.
-Never send a final response while it returns `mustContinue: true`.
-
-### Launch
-
-1. Run `pnpm workflow launch "Tree of Savior M Extreme" "TOSM TH"` to open Spotlight, type the exact app name, press Return,
-   wait for the game process, and bring its window to the front.
-2. If the full title is not resolving, run `pnpm workflow launch "TOSM TH" "TOSM TH"`.
-3. If multiple results appear, select the application result, not a document or web suggestion.
-4. Capture a window screenshot and confirm the title screen appears.
-6. If Spotlight does not show the app, refine the query with more of the title. Do not rely on `open` with the app path as the primary fallback for this wrapper.
+- Read this skill once. Reuse the app binding and discovered identity; do not
+  repeatedly list apps or reload tool documentation.
+- Emit one game-window screenshot per decision. Do not wrap auto-emitting
+  screenshot APIs in `emitImage`, emit the same image twice, or request both
+  `getAXStateAndScreenshot()` and a separate screenshot for the same state.
+- Game visuals are authoritative. Suppress the uninformative AX tree using
+  `emit: false`; if an actual accessible dialog needs element indices, emit a
+  fresh tree before using those indices.
+- Batch one chosen action plus its AX refresh and screenshot in one call.
+  Never batch speculative clicks across unseen dialogue/reward states.
+- During verified progress use the wait intervals below, then take one fresh
+  screenshot. Avoid rapid unchanged screenshots. Near a destination or dialogue
+  transition choose the shorter end; sustained travel/combat can use the longer
+  end. Never wait when a reward is already visible.
+- Verify the potion from the same HUD screenshot used to choose the next quest.
+  Open its settings only when necessary. Inspect Fellow on initial entry and
+  after recovery/map changes/reloads, rather than reopening it every quest.
+- Keep only a compact working state: current quest/objective, verified progress,
+  potion stack, fellow verification for the current session/map, auto-talk,
+  and `empty_state_count`. Do not transcribe whole dialogue or chat logs.
+- Give concise updates on meaningful progress, blockers, or roughly once per
+  minute during sustained work. Do not narrate every screenshot or click.
+- Token savings must not remove post-action visual verification, potion checks,
+  reward handling, or any of the three final exhaustion observations. Do not
+  infer success from an unchanged AX tree or hidden tracker.
 
 ### Title Screen
 
@@ -106,39 +90,40 @@ Never send a final response while it returns `mustContinue: true`.
 
 ### Quest Loop
 
-Use controller screenshots for visual decisions and controller click/key commands
-for interaction with the game UI.
+Use Computer Use window screenshots for visual decisions and its click/key APIs
+for interaction. Maintain `empty_state_count` in the persistent session or working
+state; no controller command is needed to record observations.
 
 This is a persistent loop. Do not return control to the user after launching,
 entering the game, accepting one reward, or starting one objective. Continue
 capturing and acting until the explicit exhaustion check below succeeds.
 
-1. If the app is not frontmost, run the launch workflow first.
+1. If the app is not frontmost, select the game app and raise its window using the available Computer Use actions.
    A `TOSM TH` process with no window does not count as running: relaunch it.
-2. If the game is on the barrack screen, click the visible `Start` button to enter the session.
-3. On the character screen, select the available or previously used character, then activate the visible enter/start control.
-4. Once in game, inspect the quest tracker and nearby objective markers.
-5. Check whether fellows are deployed before running objectives. The circular
+1. If the game is on the barrack screen, click the visible `Start` button to enter the session.
+1. On the character screen, select the available or previously used character, then activate the visible enter/start control.
+1. Once in game, inspect the quest tracker and nearby objective markers.
+1. Check whether fellows are deployed before running objectives. The circular
    portraits beside the skill bar do not prove that fellows occupy the active
    team. Open `Fellow` with the fourth icon in the top-right menu row and inspect
    the two team slots in the lower-right `จัดทีม` panel.
-6. Fill both empty team slots when two safe fellows are available. Select the
+1. Fill both empty team slots when two safe fellows are available. Select the
    previously used, highest-level, or clearly recommended fellow, click `Join`,
    click the intended `+` team slot, then confirm `ร่วมทาง` in the notification.
    Joining deducts one point from that fellow's stamina; this is normal
    deployment, not a purchase. Repeat for the second slot and verify that both
    slots show fellow cards before closing the screen.
-7. Do not treat the selected fellow's large center model or the bottom roster as
+1. Do not treat the selected fellow's large center model or the bottom roster as
    deployed-state evidence. Do not click `Remove`, purchase, fuse, dismiss,
    delete, or upgrade fellows unless the user explicitly asks. If fewer than two
    fellows can be safely selected, deploy the available fellow and continue.
-8. Before activating each new yellow main quest, inspect the first slot in the
+1. Before activating each new yellow main quest, inspect the first slot in the
    top row at the left edge of the skill bar. This is the configurable
    auto-potion slot. A potion marked with a Roman numeral I–VI and a positive
    quantity is the assigned stack; for example, `IV` with `131` means Potion IV
    is assigned with 131 remaining. Do not confuse the lower red-outlined
    utility slots with auto-potion slots.
-9. Do not click the assigned potion merely to verify it: clicking the potion
+1. Do not click the assigned potion merely to verify it: clicking the potion
    consumes one immediately. Preserve a visible existing assignment. Only open
    configuration when the first top-row slot is empty or its automatic-use
    state is ambiguous; then assign an available I–VI potion, confirm a positive
@@ -146,31 +131,31 @@ capturing and acting until the explicit exhaustion check below succeeds.
    unset, use the game's default or clearly recommended value. Do not buy
    potions or spend currency. Capture a fresh screenshot after any change and
    verify the first top-row slot before closing the controls.
-10. Re-run the auto-potion check even if it passed for the previous quest.
+1. Re-run the auto-potion check even if it passed for the previous quest.
    Re-check it after recovery, character reload, or any map/session transition.
    Do not activate the new quest until the check passes. Use potions already in
    inventory; do not buy potions or spend currency without explicit permission.
-11. Treat the yellow quest card at the top of the HUD tracker as the required
+1. Treat the yellow quest card at the top of the HUD tracker as the required
    main quest. Dim or gray cards below it are not part of this skill's completion
    goal. A visible yellow quest card is not necessarily active, even when
    unrelated auto-combat is running. Click the yellow quest card to activate it,
    capture a fresh
    screenshot, and confirm that auto-path, dialogue, an objective marker, or
-   another quest-specific state begins. If it does not activate, click the next
-   visible quest entry and verify again.
-11. When dialogue first appears, inspect the visible auto-talk control. If it is
+   another quest-specific state begins. If it does not activate, inspect a fresh screenshot and retry the visible
+   yellow entry; do not activate a gray quest as a fallback.
+1. When dialogue first appears, inspect the visible auto-talk control. If it is
    `None` or off, click its slider once and confirm it displays a timed interval
    such as `6 seconds`. Leave auto-talk enabled for the rest of the loop so
    dialogue pages advance without blocking.
-12. Treat a normal quest-completion reward dialog as the highest-priority
+1. Treat a normal quest-completion reward dialog as the highest-priority
     actionable state. Immediately click the teal `ตอบรับ` (Accept) button
     before waiting, relaunching, or interacting with the quest tracker. Do not
     click `ปฏิเสธ` (Decline). This permission applies only to ordinary quest
     rewards and does not authorize purchases or premium-currency choices.
-13. Immediately after accepting a reward, capture a fresh screenshot. Before
+1. Immediately after accepting a reward, capture a fresh screenshot. Before
     clicking the next visible yellow main quest, complete the auto-potion check
     again. Accepting a reward is never a stopping condition.
-14. While dialogue with auto-talk is active, wait only 5 through 8 seconds,
+1. While dialogue with auto-talk is active, wait only 5 through 8 seconds,
     capture a fresh screenshot, and immediately accept any resulting `ตอบรับ`
     reward dialog. While verified quest auto-path, quest combat, loading, or an
     objective animation is visibly progressing, choose a new random wait from
@@ -178,22 +163,22 @@ capturing and acting until the explicit exhaustion check below succeeds.
     continue the loop. Do not repeatedly click the tracker while verified quest
     progress is active. Generic auto-combat without a quest-specific indicator
     does not count as verified quest progress.
-15. If a yellow quest card is visible and no verified quest progress is active,
+1. If a yellow quest card is visible and no verified quest progress is active,
     first pass the auto-potion check, then click that yellow card. Do this even
     if the character is fighting nearby enemies. Capture a fresh screenshot
     after every click and verify that it starts a quest-specific state. Do not
     activate dim or gray quest cards merely to satisfy this skill.
-16. Re-check for a fellow after session recovery, map changes, or character
+1. Re-check for a fellow after session recovery, map changes, or character
     reloads. If the fellow disappears, repeat the fellow check before continuing
     quests.
-17. Never infer exhaustion from a hidden tracker during combat, dialogue,
+1. Never infer exhaustion from a hidden tracker during combat, dialogue,
     loading, a reward dialog, a transition, or a cinematic.
-18. Count a goal-complete state only when a fresh screenshot shows an idle,
+1. Count a goal-complete state only when a fresh screenshot shows an idle,
     unobstructed in-game HUD with no yellow quest card. Dim or gray quest cards
     may remain. Require three goal-complete states, each separated by 5 seconds.
     Reset the count to zero whenever a yellow quest card or quest progress state
     appears.
-19. Stop only after the third consecutive confirmed goal-complete state. Report
+1. Stop only after the third consecutive confirmed goal-complete state. Report
     that no yellow quest remains on the HUD.
 
 Use this literal control structure; a status update never exits it:
@@ -202,9 +187,12 @@ Use this literal control structure; a status update never exits it:
 empty_state_count = 0
 while empty_state_count < 3:
     capture and inspect a fresh game-window screenshot
-    record it with loop-observe
-    if idle, unobstructed, and no yellow quest card: wait 5 seconds
-    else: reset the count and handle the highest-priority state
+    if idle, unobstructed, and no yellow quest card:
+        increment empty_state_count
+        if empty_state_count < 3: wait 5 seconds
+    else:
+        reset empty_state_count to zero
+        handle the highest-priority state
 ```
 
 Do not report completion unless three final screenshots visibly confirm that no
@@ -215,20 +203,21 @@ completion.
 
 If the session times out, disconnects, returns to title, or gets stuck on a loading/session screen:
 
-1. If a controller screenshot fails because the `TOSM TH` window or process is
-   temporarily unavailable, run `pnpm workflow launch "Tree of Savior M Extreme" "TOSM TH"`, capture a fresh screenshot,
-   and inspect the recovered state before counting a retry.
+1. If the game window is temporarily unavailable, reacquire the app through
+   Computer Use using the discovery rules above. Capture a fresh screenshot and
+   inspect the recovered state before counting a retry.
 2. If the recovered state contains a `ตอบรับ` reward dialog, click it
    immediately and resume the quest loop. Do not classify the interruption as
    a repeated loading failure.
-3. Otherwise return to the launch/start flow.
+3. Otherwise return to the app-selection/start flow.
 4. Touch/click to start the game.
 5. Select the character again if prompted.
 6. Resume the quest loop.
 
-Keep running recovery while a timeout, loading, or pre-game state remains
-visible. Repeated recovery states are not quest exhaustion and cannot authorize
-a final response.
+Recover transient failures and resume the loop. If three recovery attempts show
+the same blocker with no progress, report that blocker without claiming quest
+completion. Stop for user interruption or a required user action. Loading,
+pre-game screens, and tool failures never count as quest exhaustion.
 
 ## Notes
 
