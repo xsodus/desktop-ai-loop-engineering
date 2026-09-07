@@ -58,19 +58,27 @@ instead of assuming that a click, key press, or wait completed the workflow.
 
 ## Architecture
 
-The repository separates policy, control, and state tracking:
+The agent selects one skill from the user's intent. The skills share the same
+observe-decide-act-verify philosophy, but they do not form a mandatory
+three-step pipeline:
 
 ```mermaid
 flowchart TD
-    U["User or agent request"] --> S["Skill policy<br/>Defines workflow rules and allowed actions"]
-    S --> D["CLI diagnostics<br/>pnpm workflow doctor"]
-    D --> C["CLI surface<br/>src/cli.ts"]
-    C --> M["macOS controller<br/>src/macos-controller.ts"]
-    M --> A["Target desktop application"]
-    A --> O["Fresh screenshot / UI observation"]
-    O --> L["Agent loop or context engine<br/>src/agent-loop.ts / src/tos-context-engine.ts"]
-    L --> T["Observation tracker<br/>src/observation-loop-tracker.ts"]
-    T --> S
+    U["User request"] --> R{"What is the goal?"}
+    R -->|"Open or switch to an app"| S1["launch-app-via-spotlight"]
+    R -->|"Run a generic visual workflow"| S2["run-visual-desktop-loop"]
+    R -->|"Continue TOS main quests"| S3["run-tree-of-savior-m-extreme-quests"]
+
+    S1 --> K["Spotlight keyboard workflow"]
+    S2 --> C["Repository CLI + macOS controller"]
+    C --> L["Screenshots + observation tracker"]
+    S3 --> CUA["Computer Use screenshots and input"]
+
+    K --> A["Target macOS app"]
+    L --> A
+    CUA --> G["Tree of Savior M Extreme"]
+
+    D["Optional TOS detector and click diagnostics"] -.-> S3
 ```
 
 ### Components
@@ -90,7 +98,7 @@ flowchart TD
 - `skills/run-tree-of-savior-m-extreme-quests/SKILL.md` defines the persistent,
   safety-constrained main-quest workflow.
 
-## Skill System
+## How the Three Skills Fit Together
 
 Skills are the human-readable policy layer. They describe:
 
@@ -101,22 +109,36 @@ Skills are the human-readable policy layer. They describe:
 - when the loop is allowed to stop
 
 That makes the decision logic auditable without burying everything inside
-controller code.
+controller code. Each skill has a different responsibility:
 
-The included skills are:
+| Skill | Responsibility | Runtime | When it finishes |
+| --- | --- | --- | --- |
+| `launch-app-via-spotlight` | Open or focus one installed macOS app | Spotlight keyboard interaction | The requested app is visible and frontmost |
+| `run-visual-desktop-loop` | Run a reusable screenshot-driven workflow for any supported app | Repository CLI and macOS controller | Three fresh observations confirm that no actionable work remains |
+| `run-tree-of-savior-m-extreme-quests` | Run the complete, game-specific yellow main-quest workflow | Computer Use | Three fresh, unobstructed HUD screenshots show no yellow quest card |
 
-- `run-tree-of-savior-m-extreme-quests`: runs the visible yellow main-quest loop
-  through Computer Use, including fellow and auto-potion checks, reward handling,
-  recovery, token-efficient observation, and a three-observation completion rule
-- `run-visual-desktop-loop`: provides the reusable controller-backed
-  observe-decide-act-verify pattern
-- `launch-app-via-spotlight`: launches and verifies an installed macOS app using
-  Spotlight
+The relationship is **selection first, optional composition second**:
 
-The TOS skill intentionally uses Computer Use as its primary runtime. The
-repository's `tos-detect` and `tos-click` commands are diagnostics and
-experimentation surfaces; the skill does not silently switch to them during its
-normal game loop.
+1. The agent selects the most specific skill that matches the request.
+2. `launch-app-via-spotlight` can be followed by
+   `run-visual-desktop-loop` when a generic workflow first needs an app opened.
+3. The TOS skill is self-contained. It owns app/session recovery, quest
+   activation, fellow and potion checks, dialogue, rewards, and completion. It
+   applies the same loop principles, but it does not invoke the other two skills
+   or the repository controller during normal execution.
+
+For example:
+
+- “Open Notes” uses only `launch-app-via-spotlight`.
+- “Open Notes and process every visible item” may use
+  `launch-app-via-spotlight`, then `run-visual-desktop-loop`.
+- “Continue the TOS main quest until it is finished” uses only
+  `run-tree-of-savior-m-extreme-quests`.
+
+This separation prevents a generic launcher or controller rule from overriding
+the stricter game-specific workflow. The repository's `tos-detect` and
+`tos-click` commands remain diagnostics and experimentation surfaces; the TOS
+skill does not silently switch to them during its normal game loop.
 
 ## TOS Context Detection
 
